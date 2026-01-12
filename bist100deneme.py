@@ -871,3 +871,4 @@ st.markdown("""
     <p style='font-size: 12px;'>⚠️ Bu uygulama yatırım tavsiyesi değildir. Kararlar kendi sorumluluğunuzdadır.</p>
 </div>
 """, unsafe_allow_html=True)
+
