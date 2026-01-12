@@ -12,9 +12,10 @@ import pandas_ta as ta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# -----------------------------
+
+# =============================
 # SAYFA AYARLARI
-# -----------------------------
+# =============================
 st.set_page_config(page_title="BIST100", layout="wide", page_icon="📈")
 
 st.markdown("""
@@ -43,29 +44,18 @@ st.markdown("""
 
     .gold-border { border-left-color: #FFD700 !important; }
     .silver-border { border-left-color: #C0C0C0 !important; }
-
-    .pill {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 999px;
-        font-size: 12px;
-        border: 1px solid #2a2e39;
-        background: #0f172a;
-        color: #d1d4dc;
-        margin-right: 6px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("📈 BIST100")
 st.caption("Manuel tarama + alarm. Otomatik sayfa yenileme KAPALI.")
 
-# -----------------------------
+
+# =============================
 # YARDIMCILAR
-# -----------------------------
+# =============================
 def safe_download(tickers, period, interval=None, group_by="column", tries=2):
     """yfinance bazen boş/kısmi döner. Basit retry + boş kontrol."""
-    last_err = None
     for _ in range(tries):
         try:
             df = yf.download(
@@ -78,10 +68,11 @@ def safe_download(tickers, period, interval=None, group_by="column", tries=2):
             )
             if df is not None and not df.empty:
                 return df
-        except Exception as e:
-            last_err = e
+        except Exception:
+            pass
         time.sleep(0.25)
     return None
+
 
 def _write_wav_mono(samples, sr=22050):
     """samples: [-1,1] float list -> mono 16-bit WAV bytes"""
@@ -95,6 +86,7 @@ def _write_wav_mono(samples, sr=22050):
             val = int(s * 32767)
             wf.writeframesraw(val.to_bytes(2, byteorder="little", signed=True))
     return buf.getvalue()
+
 
 def make_alarm_wav(kind="8-bit", sr=22050, volume=0.35):
     """
@@ -115,9 +107,7 @@ def make_alarm_wav(kind="8-bit", sr=22050, volume=0.35):
         n = int(dur * sr)
         for i in range(n):
             t = i / sr
-            # exponential decay
             env = math.exp(-4.5 * t / max(dur, 1e-6))
-            # fundamentals + harmonics
             s = (
                 math.sin(2 * math.pi * freq * t) * 1.0 +
                 math.sin(2 * math.pi * (freq * 2.01) * t) * 0.35 +
@@ -131,27 +121,19 @@ def make_alarm_wav(kind="8-bit", sr=22050, volume=0.35):
         samples.extend([0.0] * n)
 
     if kind == "8-bit":
-        # kısa, net, retro alarm
-        seq = [
-            (988, 0.08),  # B5
-            (1175, 0.08), # D6
-            (1480, 0.10), # F#6
-            (1175, 0.08),
-            (988, 0.12),
-        ]
+        seq = [(988, 0.08), (1175, 0.08), (1480, 0.10), (1175, 0.08), (988, 0.12)]
         for f, d in seq:
             square(f, d, vol=1.0)
             silence(0.02)
     else:
-        # çan gibi: tek vuruş + küçük tekrar
         bell(880, 0.35, vol=1.0)
         silence(0.06)
         bell(1320, 0.18, vol=0.7)
 
-    # normalize + volume
     peak = max(0.001, max(abs(x) for x in samples))
     samples = [(x / peak) * volume for x in samples]
     return _write_wav_mono(samples, sr=sr)
+
 
 def play_alarm(kind):
     wav = make_alarm_wav(kind=kind)
@@ -165,11 +147,10 @@ def play_alarm(kind):
         unsafe_allow_html=True,
     )
 
-# -----------------------------
-# SIDEBAR: PİYASA ÖZETİ (MANUEL)
-# -----------------------------
-st.sidebar.header("📊 Piyasa Özeti")
 
+# =============================
+# SESSION STATE
+# =============================
 if "market_cache_bust" not in st.session_state:
     st.session_state["market_cache_bust"] = 0
 if "last_market" not in st.session_state:
@@ -177,67 +158,102 @@ if "last_market" not in st.session_state:
 if "last_market_ts" not in st.session_state:
     st.session_state["last_market_ts"] = None
 
+if "alerted" not in st.session_state:
+    st.session_state["alerted"] = set()
+if "last_alarms" not in st.session_state:
+    st.session_state["last_alarms"] = []
+
+if "scan_df" not in st.session_state:
+    st.session_state["scan_df"] = None
+if "scan_params" not in st.session_state:
+    st.session_state["scan_params"] = None
+
+
+# =============================
+# PİYASA ÖZETİ (STABİL)
+# =============================
 @st.cache_data(ttl=90)
 def fetch_market(cache_bust: int):
-    symbols = ["XU100.IS", "TRY=X", "EURTRY=X", "GC=F", "SI=F"]
-    df = safe_download(symbols, period="2d", interval=None, group_by="column", tries=2)
-    if df is None or df.empty:
-        return None
-
-    if not isinstance(df.columns, pd.MultiIndex):
-        return None
-
-    close = df["Close"].copy()
-
-    def get_last_prev(ticker):
-        if ticker not in close.columns:
-            return None, None
-        ser = close[ticker].dropna()
-        if len(ser) < 2:
-            return None, None
-        return float(ser.iloc[-1]), float(ser.iloc[-2])
+    """
+    Daha stabil piyasa özeti:
+    - Her sembolü ayrı ayrı history ile çeker
+    - Alternatif semboller dener
+    - Altın gram TL: XAUTRY (ons TL) / 31.1035
+    - Gümüş ons: XAGUSD (USD/ons)
+    """
+    def last_prev_from_any(symbol_candidates, period="7d", interval="1d"):
+        for sym in symbol_candidates:
+            try:
+                h = yf.Ticker(sym).history(period=period, interval=interval, auto_adjust=False)
+                if h is None or h.empty or "Close" not in h.columns:
+                    continue
+                close = h["Close"].dropna()
+                if len(close) < 2:
+                    continue
+                return sym, float(close.iloc[-1]), float(close.iloc[-2])
+            except Exception:
+                continue
+        return None, None, None
 
     out = {}
 
-    last, prev = get_last_prev("XU100.IS")
+    # 1) BIST100 (puan) - alternatifli
+    bist_syms = ["XU100.IS", "^XU100"]
+    _, last, prev = last_prev_from_any(bist_syms)
     if last is not None:
         out["BIST 100"] = (last, (last / prev - 1) * 100)
 
-    last, prev = get_last_prev("TRY=X")
+    # 2) USD/TRY - alternatifli
+    usd_syms = ["USDTRY=X", "TRY=X"]
+    _, last, prev = last_prev_from_any(usd_syms)
     if last is not None:
         out["USD/TRY"] = (last, (last / prev - 1) * 100)
         usd_now, usd_prev = last, prev
     else:
         usd_now, usd_prev = None, None
 
-    last, prev = get_last_prev("EURTRY=X")
+    # 3) EUR/TRY
+    eur_syms = ["EURTRY=X"]
+    _, last, prev = last_prev_from_any(eur_syms)
     if last is not None:
         out["EUR/TRY"] = (last, (last / prev - 1) * 100)
 
-    # Gram hesap (USD/TRY varsa)
-    if usd_now and usd_prev:
-        def ons_to_gram(ons_last, ons_prev):
-            val_now = (ons_last * usd_now) / 31.1035
-            val_prev = (ons_prev * usd_prev) / 31.1035
-            return val_now, (val_now / val_prev - 1) * 100
+    # 4) Altın Gram TL
+    xautry_syms = ["XAUTRY=X"]
+    _, ons_try_last, ons_try_prev = last_prev_from_any(xautry_syms)
+    if ons_try_last is not None:
+        gram_last = ons_try_last / 31.1035
+        gram_prev = ons_try_prev / 31.1035
+        out["Altın (Gram TL)"] = (gram_last, (gram_last / gram_prev - 1) * 100)
+    else:
+        # alternatif: ons USD + USDTRY
+        if usd_now and usd_prev:
+            xauusd_syms = ["XAUUSD=X", "GC=F"]
+            _, ons_usd_last, ons_usd_prev = last_prev_from_any(xauusd_syms)
+            if ons_usd_last is not None:
+                gram_last = (ons_usd_last * usd_now) / 31.1035
+                gram_prev = (ons_usd_prev * usd_prev) / 31.1035
+                out["Altın (Gram TL)"] = (gram_last, (gram_last / gram_prev - 1) * 100)
 
-        g_last, g_prev = get_last_prev("GC=F")
-        if g_last is not None:
-            val, chg = ons_to_gram(g_last, g_prev)
-            out["Gram Altın"] = (val, chg)
+    # 5) Gümüş ons (USD/ons)
+    xagusd_syms = ["XAGUSD=X", "SI=F"]
+    _, last, prev = last_prev_from_any(xagusd_syms)
+    if last is not None:
+        out["Gümüş (USD/ons)"] = (last, (last / prev - 1) * 100)
 
-        s_last, s_prev = get_last_prev("SI=F")
-        if s_last is not None:
-            val, chg = ons_to_gram(s_last, s_prev)
-            out["Gram Gümüş"] = (val, chg)
+    return out if out else None
 
-    return out
 
-colm1, colm2 = st.sidebar.columns([1,1])
-with colm1:
+# =============================
+# SIDEBAR: PİYASA ÖZETİ
+# =============================
+st.sidebar.header("📊 Piyasa Özeti")
+
+col_m1, col_m2 = st.sidebar.columns([1, 1])
+with col_m1:
     if st.button("🔄 Güncelle", use_container_width=True):
         st.session_state["market_cache_bust"] += 1
-with colm2:
+with col_m2:
     st.caption("Oto-yenileme yok.")
 
 market = fetch_market(st.session_state["market_cache_bust"])
@@ -252,7 +268,7 @@ else:
     stale = True
 
 if market:
-    order = ["BIST 100", "USD/TRY", "EUR/TRY", "Gram Altın", "Gram Gümüş"]
+    order = ["BIST 100", "USD/TRY", "EUR/TRY", "Altın (Gram TL)", "Gümüş (USD/ons)"]
     for key in order:
         if key not in market:
             continue
@@ -261,9 +277,11 @@ if market:
         renk = "up" if up else "down"
         icon = "▲" if up else "▼"
         extra = "gold-border" if "Altın" in key else ("silver-border" if "Gümüş" in key else "")
+
         stale_txt = ""
         if stale:
             stale_txt = f'<div class="market-stale">⏳ Son veri: {st.session_state["last_market_ts"] or "?"} (stale)</div>'
+
         st.sidebar.markdown(f"""
         <div class="market-card {extra}">
             <div class="market-label">{key}</div>
@@ -275,9 +293,9 @@ if market:
 else:
     st.sidebar.warning("Piyasa verisi alınamadı (yfinance).")
 
-# -----------------------------
+# =============================
 # SIDEBAR: TARAMA + ALARM AYARLARI
-# -----------------------------
+# =============================
 st.sidebar.divider()
 st.sidebar.header("⚙️ Tarama Ayarları")
 
@@ -313,12 +331,10 @@ alarm_macd = st.sidebar.checkbox("MACD AL", value=True)
 alarm_sound_kind = st.sidebar.selectbox("Alarm Sesi", ["8-bit", "Çan", "Kapalı"], index=0)
 alarm_sound_on = (alarm_sound_kind != "Kapalı")
 
-# alarm tekrarını engelle
-if "alerted" not in st.session_state:
-    st.session_state["alerted"] = set()
-if "last_alarms" not in st.session_state:
-    st.session_state["last_alarms"] = []
 
+# =============================
+# TARAMA MOTORU
+# =============================
 def timeframe_params(mode_name):
     if mode_name == "Kısa Vade (1s)":
         return {"period": "60d", "interval": "60m"}
@@ -327,8 +343,10 @@ def timeframe_params(mode_name):
     else:
         return {"period": "2y", "interval": "1d"}
 
+
 def bulk_download(hisseler, period, interval):
     return safe_download(hisseler, period=period, interval=interval, group_by="ticker", tries=2)
+
 
 def extract_ticker_df(bulk_df, ticker):
     if bulk_df is None or bulk_df.empty:
@@ -339,6 +357,7 @@ def extract_ticker_df(bulk_df, ticker):
             out.columns = [c if isinstance(c, str) else str(c) for c in out.columns]
             return out
     return None
+
 
 def karar_ver(rsi, macd_al, skor):
     if rsi > rsi_ust:
@@ -351,6 +370,7 @@ def karar_ver(rsi, macd_al, skor):
         return "⛔ UZAK DUR"
     return "🟡 İZLE"
 
+
 def yapay_zeka_yorumu(rsi, macd_al, golden_cross, trend_guclu, mini_cross):
     yorum = []
     if rsi < rsi_alt:
@@ -359,21 +379,16 @@ def yapay_zeka_yorumu(rsi, macd_al, golden_cross, trend_guclu, mini_cross):
         yorum.append(f"RSI tepe ({rsi}).")
     if macd_al:
         yorum.append("MACD pozitife döndü.")
-    if trend_guclu:
-        yorum.append("Trend güçlü.")
-    else:
-        yorum.append("Trend zayıf/yatay.")
+    yorum.append("Trend güçlü." if trend_guclu else "Trend zayıf/yatay.")
     if mini_cross:
         yorum.append("Mini Cross!")
     if golden_cross:
         yorum.append("Golden Cross!")
     return " ".join(yorum)
 
+
 def fire_alarm(hisse, kind, ts_key):
-    """
-    Aynı sinyal tekrar tekrar çalmasın diye anahtar basıyoruz.
-    ts_key: bar zamanı / tarih gibi bir şey
-    """
+    """Aynı bar için aynı alarmı tekrar çalma."""
     key = f"{hisse}:{kind}:{ts_key}"
     if key in st.session_state["alerted"]:
         return
@@ -386,13 +401,14 @@ def fire_alarm(hisse, kind, ts_key):
     if alarm_sound_on:
         play_alarm(alarm_sound_kind)
 
+
 def run_scan(hisse_listesi, mode_name):
     params = timeframe_params(mode_name)
     period, interval = params["period"], params["interval"]
 
     bulk = bulk_download(hisse_listesi, period=period, interval=interval)
-
     results = []
+
     bar = st.progress(0.0)
     status = st.empty()
 
@@ -404,7 +420,7 @@ def run_scan(hisse_listesi, mode_name):
         if df is None or df.empty:
             continue
 
-        # Kısa vadede 60m -> yeterli bar yoksa atlama
+        # yeterli bar yoksa atla
         if len(df) < 80:
             continue
 
@@ -417,11 +433,11 @@ def run_scan(hisse_listesi, mode_name):
 
         df["ATR"] = ta.atr(df["High"], df["Low"], df["Close"], length=14)
 
-        # Golden Cross (klasik)
+        # Klasik golden cross
         df["SMA_50"] = ta.sma(df["Close"], length=50)
         df["SMA_200"] = ta.sma(df["Close"], length=200)
 
-        # Mini Cross (kısa vade)
+        # Kısa vade mini cross
         df["EMA_20"] = ta.ema(df["Close"], length=20)
         df["EMA_50"] = ta.ema(df["Close"], length=50)
 
@@ -463,7 +479,7 @@ def run_scan(hisse_listesi, mode_name):
                 macd_al = True
                 sinyaller.append("🚀 MACD AL")
                 skor += 3
-        except:
+        except Exception:
             pass
 
         # Golden Cross
@@ -474,7 +490,7 @@ def run_scan(hisse_listesi, mode_name):
                 sinyaller.append("⭐ GOLDEN CROSS")
                 skor += 5
 
-        # Mini Cross EMA20/50
+        # Mini Cross
         mini_cross = False
         if not pd.isna(last.get("EMA_20")) and not pd.isna(last.get("EMA_50")):
             if last["EMA_20"] > last["EMA_50"] and prev["EMA_20"] < prev["EMA_50"]:
@@ -493,13 +509,13 @@ def run_scan(hisse_listesi, mode_name):
                 skor += 1
             elif adx_val <= 18:
                 sinyaller.append("💤 ZAYIF TREND")
-        except:
+        except Exception:
             pass
 
         hisse = symbol.replace(".IS", "")
 
         # Alarmlar (Sadece yeni oluştuysa)
-        ts_key = str(df.index[-1])  # bar zamanı
+        ts_key = str(df.index[-1])
         if alarm_golden and golden_cross:
             fire_alarm(hisse, "GOLDEN CROSS (SMA50/200)", ts_key)
         if alarm_mini and mini_cross:
@@ -510,7 +526,7 @@ def run_scan(hisse_listesi, mode_name):
         karar = karar_ver(rsi, macd_al, skor)
         yorum = yapay_zeka_yorumu(round(rsi, 2), macd_al, golden_cross, trend_guclu, mini_cross)
 
-        # listede her şeyi görmek istersen filtresiz ekle; şimdilik sinyal olanları öne alıyoruz
+        # sonuç listesi (sinyal/puanlı olanlar)
         if sinyaller or skor >= 3:
             results.append({
                 "Hisse": hisse,
@@ -527,35 +543,35 @@ def run_scan(hisse_listesi, mode_name):
     status.empty()
     return pd.DataFrame(results), params
 
-# -----------------------------
+
+# =============================
 # ÜST BUTONLAR (MANUEL)
-# -----------------------------
+# =============================
 c1, c2 = st.columns([1, 4])
 with c1:
     start = st.button("TARAMAYI BAŞLAT 🕵️‍♂️", type="primary", use_container_width=True)
 with c2:
     st.info("Oto-yenileme kapalı. Tarama ve alarmlar sadece butona basınca çalışır.")
 
-if "scan_df" not in st.session_state:
-    st.session_state["scan_df"] = None
-if "scan_params" not in st.session_state:
-    st.session_state["scan_params"] = None
-
 if start:
     with st.spinner("Analiz ediliyor..."):
         st.session_state["scan_df"], st.session_state["scan_params"] = run_scan(secilen_hisseler, mode)
 
-# Alarm paneli
+
+# =============================
+# ALARM PANELİ
+# =============================
 if st.session_state["last_alarms"]:
     with st.expander("🚨 Son Alarmlar", expanded=True):
         for a in st.session_state["last_alarms"]:
             st.write(a)
 
+
+# =============================
+# SONUÇ TABLOSU
+# =============================
 df_out = st.session_state["scan_df"]
 
-# -----------------------------
-# SONUÇ TABLOSU
-# -----------------------------
 if df_out is not None and not df_out.empty:
     df_final = df_out.sort_values(by="Skor", ascending=False)
 
@@ -571,18 +587,23 @@ if df_out is not None and not df_out.empty:
         height=520
     )
 
-    # -----------------------------
+    # =============================
     # GRAFİK
-    # -----------------------------
+    # =============================
     st.divider()
     st.subheader("📊 Grafik")
 
-    vade_map = {"5 Gün (1s)": ("5d", "60m"), "1 Ay": ("1mo", "1d"), "3 Ay": ("3mo", "1d"), "6 Ay": ("6mo", "1d"), "1 Yıl": ("1y", "1d")}
-    col_sel, col_radio = st.columns([1, 2])
+    vade_map = {
+        "5 Gün (1s)": ("5d", "60m"),
+        "1 Ay": ("1mo", "1d"),
+        "3 Ay": ("3mo", "1d"),
+        "6 Ay": ("6mo", "1d"),
+        "1 Yıl": ("1y", "1d")
+    }
 
+    col_sel, col_radio = st.columns([1, 2])
     with col_sel:
         selected = st.selectbox("İncelenecek Hisse:", df_final["Hisse"].unique())
-
     with col_radio:
         secilen_vade_ad = st.radio("Grafik Vadesi:", list(vade_map.keys()), horizontal=True, index=1)
 
@@ -598,8 +619,10 @@ if df_out is not None and not df_out.empty:
                 if isinstance(df_chart.columns, pd.MultiIndex):
                     df_chart = df_chart.droplevel(1, axis=1)
 
-                fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                                    vertical_spacing=0.05, row_heights=[0.75, 0.25])
+                fig = make_subplots(
+                    rows=2, cols=1, shared_xaxes=True,
+                    vertical_spacing=0.05, row_heights=[0.75, 0.25]
+                )
 
                 fig.add_trace(go.Candlestick(
                     x=df_chart.index,
@@ -620,7 +643,7 @@ if df_out is not None and not df_out.empty:
                     name="Hacim", marker_color=colors, opacity=0.6
                 ), row=2, col=1)
 
-                # Stop çizgisi (tablodan)
+                # Stop çizgisi
                 row_data = df_final[df_final["Hisse"] == selected].iloc[0]
                 stop_level = row_data["Stop-Loss"]
                 if stop_level != "-" and stop_level is not None:
@@ -633,7 +656,7 @@ if df_out is not None and not df_out.empty:
                             line=dict(color="orange", width=1.5, dash="dash"),
                             row=1, col=1
                         )
-                    except:
+                    except Exception:
                         pass
 
                 fig.update_layout(
@@ -657,12 +680,12 @@ if df_out is not None and not df_out.empty:
                         profit_pct = ((target_price - curr_price) / curr_price) * 100 if curr_price else 0
                         loss_pct = ((curr_price - stop_level_f) / curr_price) * 100 if curr_price else 0
 
-                        c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("🔵 FİYAT", f"{curr_price:.2f} TL")
-                        c2.metric("🟢 HEDEF (1:3)", f"{target_price:.2f}", f"%{profit_pct:.1f}")
-                        c3.metric("🔴 STOP (ATR)", f"{stop_level_f:.2f}", f"-%{loss_pct:.1f}")
-                        c4.metric("💰 RİSK", f"{risk_amount:.2f} TL")
-                except:
+                        cc1, cc2, cc3, cc4 = st.columns(4)
+                        cc1.metric("🔵 FİYAT", f"{curr_price:.2f} TL")
+                        cc2.metric("🟢 HEDEF (1:3)", f"{target_price:.2f}", f"%{profit_pct:.1f}")
+                        cc3.metric("🔴 STOP (ATR)", f"{stop_level_f:.2f}", f"-%{loss_pct:.1f}")
+                        cc4.metric("💰 RİSK", f"{risk_amount:.2f} TL")
+                except Exception:
                     pass
 
 else:
