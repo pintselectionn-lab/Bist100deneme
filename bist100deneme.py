@@ -4,50 +4,11 @@ import pandas as pd
 import pandas_ta as ta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
-import base64
-from io import BytesIO
-import numpy as np
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="BIST100 PRO", layout="wide", page_icon="📈")
-
-# --- SES ALARM FONKSİYONLARI ---
-def create_audio_element(frequency, duration, volume=0.3):
-    """Basit beep ses oluştur"""
-    sample_rate = 22050
-    t = np.linspace(0, duration, int(sample_rate * duration))
-    wave = np.sin(2 * np.pi * frequency * t) * volume
-    wave = (wave * 32767).astype(np.int16)
-    
-    # WAV header oluştur
-    byte_io = BytesIO()
-    import wave
-    with wave.open(byte_io, 'w') as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(wave.tobytes())
-    
-    byte_io.seek(0)
-    b64 = base64.b64encode(byte_io.read()).decode()
-    return f'data:audio/wav;base64,{b64}'
-
-def play_sound(sound_type):
-    """Alarm seslerini çal"""
-    sounds = {
-        'buy': (800, 0.3),      # Yüksek ton - Alım
-        'sell': (400, 0.4),     # Düşük ton - Satış
-        'alert': (600, 0.2),    # Orta ton - Uyarı
-        'success': (1000, 0.5), # Çok yüksek - Başarı
-    }
-    
-    if sound_type in sounds:
-        freq, dur = sounds[sound_type]
-        audio_data = create_audio_element(freq, dur)
-        st.markdown(f'<audio autoplay><source src="{audio_data}" type="audio/wav"></audio>', 
-                   unsafe_allow_html=True)
 
 # --- CSS ---
 st.markdown("""
@@ -118,7 +79,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("📈 BIST100 PRO TRADER")
-st.markdown("**Gelişmiş Teknik Analiz | Portföy Yönetimi | Ses Alarmları**")
+st.markdown("**Gelişmiş Teknik Analiz | Portföy Yönetimi | Akıllı Sinyaller**")
 
 # --- SESSION STATE BAŞLATMA ---
 if 'portfolio' not in st.session_state:
@@ -127,10 +88,9 @@ if 'data' not in st.session_state:
     st.session_state['data'] = None
 if 'last_alerts' not in st.session_state:
     st.session_state['last_alerts'] = {}
-if 'alarm_enabled' not in st.session_state:
-    st.session_state['alarm_enabled'] = True
 
 # --- PİYASA VERİLERİ ---
+@st.cache_data(ttl=300)
 def piyasa_verilerini_cek():
     semboller = ["XU100.IS", "TRY=X", "EURTRY=X", "GC=F", "SI=F"]
     data = {}
@@ -145,12 +105,14 @@ def piyasa_verilerini_cek():
             
         def get_data(ticker, label, is_calc_gram=False, usd_val=None, prev_usd=None):
             try:
-                if ticker not in close.columns: return
+                if ticker not in close.columns: 
+                    return
                 
                 last = close[ticker].iloc[-1]
                 prev = close[ticker].iloc[-2]
                 
-                if pd.isna(last) or pd.isna(prev): return
+                if pd.isna(last) or pd.isna(prev): 
+                    return
                 
                 if is_calc_gram and usd_val and prev_usd:
                     val_now = (last * usd_val) / 31.1035
@@ -177,6 +139,7 @@ def piyasa_verilerini_cek():
             
         return data
     except Exception as e:
+        st.error(f"Piyasa verileri alınamadı: {str(e)}")
         return None
 
 # --- PORTFÖY YÖNETİMİ ---
@@ -189,6 +152,9 @@ def portfoy_hesapla():
         try:
             ticker = f"{hisse}.IS"
             df = yf.download(ticker, period="1d", progress=False)
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            
             if not df.empty:
                 guncel_fiyat = df['Close'].iloc[-1]
                 adet = bilgi['adet']
@@ -207,7 +173,6 @@ def portfoy_hesapla():
 def portfoy_ekle(hisse, adet, alis_fiyati):
     """Portföye hisse ekle"""
     if hisse in st.session_state['portfolio']:
-        # Mevcut hisse varsa ortalama al
         mevcut = st.session_state['portfolio'][hisse]
         toplam_adet = mevcut['adet'] + adet
         ortalama_fiyat = ((mevcut['alis_fiyati'] * mevcut['adet']) + (alis_fiyati * adet)) / toplam_adet
@@ -226,7 +191,6 @@ def portfoy_ekle(hisse, adet, alis_fiyati):
 # --- YAN PANEL ---
 st.sidebar.header("📊 Piyasa Özeti")
 
-# Piyasa verileri
 piyasa_data = piyasa_verilerini_cek()
 
 if piyasa_data:
@@ -239,8 +203,10 @@ if piyasa_data:
             icon = "▲" if degisim >= 0 else "▼"
             
             extra_class = ""
-            if "Altın" in key: extra_class = "gold-border"
-            elif "Gümüş" in key: extra_class = "silver-border"
+            if "Altın" in key: 
+                extra_class = "gold-border"
+            elif "Gümüş" in key: 
+                extra_class = "silver-border"
             
             st.sidebar.markdown(f"""
             <div class="market-card {extra_class}">
@@ -257,45 +223,49 @@ st.sidebar.divider()
 # --- PORTFÖY BÖLÜMÜ ---
 st.sidebar.header("💼 Portföyüm")
 
-# Portföy özeti
 if st.session_state['portfolio']:
-    toplam_deger, toplam_maliyet, kar_zarar, kar_zarar_pct = portfoy_hesapla()
-    
-    st.sidebar.markdown(f"""
-    <div class="portfolio-card">
-        <div class="portfolio-title">TOPLAM PORTFÖY</div>
-        <div class="portfolio-value">{toplam_deger:,.2f} ₺</div>
-        <div class="portfolio-change {'up' if kar_zarar >= 0 else 'down'}">
-            {'▲' if kar_zarar >= 0 else '▼'} {kar_zarar:,.2f} ₺ ({kar_zarar_pct:+.2f}%)
+    try:
+        toplam_deger, toplam_maliyet, kar_zarar, kar_zarar_pct = portfoy_hesapla()
+        
+        st.sidebar.markdown(f"""
+        <div class="portfolio-card">
+            <div class="portfolio-title">TOPLAM PORTFÖY</div>
+            <div class="portfolio-value">{toplam_deger:,.2f} ₺</div>
+            <div class="portfolio-change {'up' if kar_zarar >= 0 else 'down'}">
+                {'▲' if kar_zarar >= 0 else '▼'} {kar_zarar:,.2f} ₺ ({kar_zarar_pct:+.2f}%)
+            </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Portföy detayları
-    with st.sidebar.expander("📋 Portföy Detayları", expanded=False):
-        for hisse, bilgi in st.session_state['portfolio'].items():
-            try:
-                ticker = f"{hisse}.IS"
-                df = yf.download(ticker, period="1d", progress=False)
-                if not df.empty:
-                    guncel = df['Close'].iloc[-1]
-                    adet = bilgi['adet']
-                    alis = bilgi['alis_fiyati']
-                    kar = (guncel - alis) * adet
-                    kar_pct = ((guncel - alis) / alis) * 100
+        """, unsafe_allow_html=True)
+        
+        with st.sidebar.expander("📋 Portföy Detayları", expanded=False):
+            for hisse, bilgi in st.session_state['portfolio'].items():
+                try:
+                    ticker = f"{hisse}.IS"
+                    df = yf.download(ticker, period="1d", progress=False)
+                    if isinstance(df.columns, pd.MultiIndex):
+                        df.columns = df.columns.get_level_values(0)
                     
-                    st.markdown(f"""
-                    **{hisse}**  
-                    🔵 {adet} adet × {guncel:.2f} ₺  
-                    💰 K/Z: {kar:,.2f} ₺ ({kar_pct:+.2f}%)
-                    """)
-                    
-                    if st.button(f"❌ {hisse} Sil", key=f"del_{hisse}", use_container_width=True):
-                        del st.session_state['portfolio'][hisse]
-                        st.rerun()
-                    st.divider()
-            except:
-                continue
+                    if not df.empty:
+                        guncel = df['Close'].iloc[-1]
+                        adet = bilgi['adet']
+                        alis = bilgi['alis_fiyati']
+                        kar = (guncel - alis) * adet
+                        kar_pct = ((guncel - alis) / alis) * 100
+                        
+                        st.markdown(f"""
+                        **{hisse}**  
+                        🔵 {adet} adet × {guncel:.2f} ₺  
+                        💰 K/Z: {kar:,.2f} ₺ ({kar_pct:+.2f}%)
+                        """)
+                        
+                        if st.button(f"❌ {hisse} Sil", key=f"del_{hisse}", use_container_width=True):
+                            del st.session_state['portfolio'][hisse]
+                            st.rerun()
+                        st.divider()
+                except:
+                    continue
+    except Exception as e:
+        st.sidebar.error("Portföy hesaplanamadı")
 else:
     st.sidebar.info("Portföyünüz boş. Analiz sonuçlarından hisse ekleyin.")
 
@@ -303,9 +273,6 @@ st.sidebar.divider()
 
 # --- AYARLAR ---
 st.sidebar.header("⚙️ Ayarlar")
-
-# Ses alarmı
-st.session_state['alarm_enabled'] = st.sidebar.checkbox("🔔 Ses Alarmları", value=True)
 
 varsayilan_hisseler = [
     "AEFES.IS", "AGHOL.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKFGY.IS", "AKFYE.IS", "AKSA.IS", "AKSEN.IS", "ALARK.IS",
@@ -321,8 +288,11 @@ varsayilan_hisseler = [
     "VESBE.IS", "VESTL.IS", "YEOTK.IS", "YKBNK.IS", "YYLGD.IS", "ZOREN.IS", "ANSGR.IS"
 ]
 
-secilen_hisseler = st.sidebar.multiselect("📊 Taranacak Hisseler", varsayilan_hisseler, 
-                                          default=varsayilan_hisseler[:20])
+secilen_hisseler = st.sidebar.multiselect(
+    "📊 Taranacak Hisseler", 
+    varsayilan_hisseler, 
+    default=varsayilan_hisseler[:20]
+)
 
 st.sidebar.markdown("**İndikatör Ayarları**")
 rsi_alt = st.sidebar.slider("RSI Alım (<)", 20, 40, 30)
@@ -351,31 +321,39 @@ def karar_ver(rsi, macd_al, skor, bb_signal, stoch_signal):
         return "🟡 İZLE"
 
 def yapay_zeka_yorumu(rsi, macd_al, golden_cross, trend_guclu, mum_formasyonu, bb_signal, 
-                      stoch_signal, volume_signal, hisse_adi):
+                      stoch_signal, volume_signal):
     """Geliştirilmiş AI yorumu"""
     yorumlar = []
     
-    # RSI analizi
-    if rsi < 25: yorumlar.append(f"⚠️ Aşırı satış (RSI:{rsi:.1f})")
-    elif rsi < 30: yorumlar.append(f"📉 Oversold (RSI:{rsi:.1f})")
-    elif rsi > 75: yorumlar.append(f"🔥 Aşırı alım! (RSI:{rsi:.1f})")
-    elif rsi > 70: yorumlar.append(f"📈 Overbought (RSI:{rsi:.1f})")
+    if rsi < 25: 
+        yorumlar.append(f"⚠️ Aşırı satış (RSI:{rsi:.1f})")
+    elif rsi < 30: 
+        yorumlar.append(f"📉 Oversold (RSI:{rsi:.1f})")
+    elif rsi > 75: 
+        yorumlar.append(f"🔥 Aşırı alım! (RSI:{rsi:.1f})")
+    elif rsi > 70: 
+        yorumlar.append(f"📈 Overbought (RSI:{rsi:.1f})")
     
-    # Momentum
-    if macd_al: yorumlar.append("✅ MACD pozitif")
+    if macd_al: 
+        yorumlar.append("✅ MACD pozitif")
     
-    # Trend
-    if trend_guclu: yorumlar.append("💪 Güçlü trend")
-    else: yorumlar.append("💤 Yatay piyasa")
+    if trend_guclu: 
+        yorumlar.append("💪 Güçlü trend")
+    else: 
+        yorumlar.append("💤 Yatay piyasa")
     
-    # Özel sinyaller
-    if golden_cross: yorumlar.append("⭐ Golden Cross!")
-    if mum_formasyonu: yorumlar.append(f"🕯️ {mum_formasyonu}")
-    if bb_signal: yorumlar.append(f"📊 BB: {bb_signal}")
-    if stoch_signal: yorumlar.append(f"📉 Stoch: {stoch_signal}")
-    if volume_signal: yorumlar.append(f"📊 {volume_signal}")
+    if golden_cross: 
+        yorumlar.append("⭐ Golden Cross!")
+    if mum_formasyonu: 
+        yorumlar.append(f"🕯️ {mum_formasyonu}")
+    if bb_signal: 
+        yorumlar.append(f"📊 BB: {bb_signal}")
+    if stoch_signal: 
+        yorumlar.append(f"📉 Stoch: {stoch_signal}")
+    if volume_signal: 
+        yorumlar.append(f"📊 {volume_signal}")
     
-    return " | ".join(yorumlar)
+    return " | ".join(yorumlar) if yorumlar else "Normal piyasa koşulları"
 
 def verileri_getir(hisse_listesi):
     """Ana analiz motoru"""
@@ -388,7 +366,6 @@ def verileri_getir(hisse_listesi):
         status.caption(f"🔍 Analiz: {symbol}")
         
         try:
-            # Veri çek
             df = yf.download(symbol, period="1y", interval="1d", progress=False)
             if isinstance(df.columns, pd.MultiIndex): 
                 df.columns = df.columns.get_level_values(0)
@@ -398,49 +375,41 @@ def verileri_getir(hisse_listesi):
             # --- TEMEL İNDİKATÖRLER ---
             df['RSI'] = df.ta.rsi(length=14)
             
-            # MACD
             macd = df.ta.macd(fast=12, slow=26, signal=9)
             if macd is not None: 
                 df = pd.concat([df, macd], axis=1)
             
-            # SMA
             df['SMA_50'] = df.ta.sma(length=50)
             df['SMA_200'] = df.ta.sma(length=200)
             
-            # ADX
             adx = df.ta.adx(length=14)
             if adx is not None: 
                 df = pd.concat([df, adx], axis=1)
             
-            # ATR
             df['ATR'] = df.ta.atr(length=14)
             
             # --- GELİŞMİŞ İNDİKATÖRLER ---
-            
-            # Bollinger Bands
             bb = df.ta.bbands(length=bb_length, std=2)
             if bb is not None:
                 df = pd.concat([df, bb], axis=1)
             
-            # Stochastic RSI
             stoch = df.ta.stoch(k=14, d=3, smooth_k=3)
             if stoch is not None:
                 df = pd.concat([df, stoch], axis=1)
             
-            # OBV (On-Balance Volume)
             df['OBV'] = df.ta.obv()
-            
-            # Volume SMA
             df['Volume_SMA'] = df['Volume'].rolling(window=20).mean()
             
-            # Mum formasyonları
             try:
                 engulf = df.ta.cdl_engulfing()
                 doji = df.ta.cdl_doji()
                 hammer = df.ta.cdl_hammer()
-                if engulf is not None: df = pd.concat([df, engulf], axis=1)
-                if doji is not None: df = pd.concat([df, doji], axis=1)
-                if hammer is not None: df = pd.concat([df, hammer], axis=1)
+                if engulf is not None: 
+                    df = pd.concat([df, engulf], axis=1)
+                if doji is not None: 
+                    df = pd.concat([df, doji], axis=1)
+                if hammer is not None: 
+                    df = pd.concat([df, hammer], axis=1)
             except: 
                 pass
             
@@ -456,7 +425,7 @@ def verileri_getir(hisse_listesi):
             sinyaller_listesi = []
             skor = 0
             
-            # RSI sinyalleri
+            # RSI
             if rsi < rsi_alt: 
                 sinyaller_listesi.append("🟢 RSI DİP")
                 skor += 2
@@ -483,7 +452,7 @@ def verileri_getir(hisse_listesi):
                 sinyaller_listesi.append("⭐ GOLDEN CROSS")
                 skor += 5
             
-            # Trend gücü
+            # Trend
             trend_guclu = False
             try:
                 adx_col = [col for col in df.columns if col.startswith('ADX_')][0]
@@ -495,8 +464,6 @@ def verileri_getir(hisse_listesi):
                     sinyaller_listesi.append("💤 ZAYIF TREND")
             except: 
                 pass
-            
-            # --- GELİŞMİŞ SİNYALLER ---
             
             # Bollinger Bands
             bb_signal = None
@@ -532,14 +499,14 @@ def verileri_getir(hisse_listesi):
             except: 
                 pass
             
-            # Volume analizi
+            # Volume
             volume_signal = None
             if son['Volume'] > son['Volume_SMA'] * 1.5:
                 volume_signal = "YÜKSEK HACİM"
                 sinyaller_listesi.append("📊 YÜKSEK HACİM")
                 skor += 1
             
-            # OBV trend
+            # OBV
             try:
                 obv_sma = df['OBV'].rolling(window=20).mean()
                 if son['OBV'] > obv_sma.iloc[-1]:
@@ -565,23 +532,21 @@ def verileri_getir(hisse_listesi):
             except: 
                 pass
             
-            # Portföyde mi?
+            # Portföy kontrolü
             hisse_adi = symbol.replace(".IS", "")
             if hisse_adi in st.session_state['portfolio']:
                 sinyaller_listesi.append("💼 PORTFÖYDE")
             
-            # Karar ver
+            # Karar
             karar = karar_ver(rsi, macd_al, skor, bb_signal, stoch_signal)
             ai_yorum = yapay_zeka_yorumu(rsi, macd_al, golden_cross, trend_guclu, 
-                                        mum_formasyonu, bb_signal, stoch_signal, 
-                                        volume_signal, hisse_adi)
+                                        mum_formasyonu, bb_signal, stoch_signal, volume_signal)
             
-            # Hedef fiyat hesapla
+            # Hedefler
             risk = max(0, fiyat - stop_loss)
-            hedef_1 = fiyat + (risk * 2)  # 1:2 R/R
-            hedef_2 = fiyat + (risk * 3)  # 1:3 R/R
+            hedef_1 = fiyat + (risk * 2)
+            hedef_2 = fiyat + (risk * 3)
             
-            # Sonuçları ekle
             if len(sinyaller_listesi) > 0 or hisse_adi in st.session_state['portfolio']:
                 sonuclar.append({
                     "Hisse": hisse_adi,
@@ -594,17 +559,7 @@ def verileri_getir(hisse_listesi):
                     "Stop-Loss": stop_loss,
                     "Hedef 1:2": hedef_1,
                     "Hedef 1:3": hedef_2,
-                    "Risk/Ödül": f"1:2-3"
                 })
-                
-                # Alarm kontrolü
-                if st.session_state['alarm_enabled']:
-                    if "GÜÇLÜ AL" in karar and hisse_adi not in st.session_state.get('last_alerts', {}):
-                        play_sound('buy')
-                        st.session_state['last_alerts'][hisse_adi] = 'buy'
-                    elif "SAT" in karar and st.session_state.get('last_alerts', {}).get(hisse_adi) == 'buy':
-                        play_sound('sell')
-                        st.session_state['last_alerts'][hisse_adi] = 'sell'
                         
         except Exception as e:
             continue
@@ -630,14 +585,13 @@ with col3:
 if start:
     with st.spinner("🔍 Piyasa taranıyor..."):
         st.session_state['data'] = verileri_getir(secilen_hisseler)
-        if st.session_state['alarm_enabled']:
-            play_sound('success')
+        st.success("✅ Tarama tamamlandı!")
 
 # --- SONUÇLAR ---
 if st.session_state['data'] is not None and not st.session_state['data'].empty:
     df_final = st.session_state['data'].sort_values(by="Skor", ascending=False)
     
-    # Üst metrikler
+    # Metrikler
     col1, col2, col3, col4 = st.columns(4)
     
     guclu_al = len(df_final[df_final['Karar'].str.contains("GÜÇLÜ AL")])
@@ -652,7 +606,7 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
     
     st.divider()
     
-    # Alarmlar
+    # Alarm
     if guclu_al > 0:
         st.markdown(f"""
         <div class="alert-box">
@@ -678,7 +632,7 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
         height=400
     )
     
-    # Portföye ekle butonu
+    # Portföye ekle
     st.divider()
     st.subheader("💼 Portföye Ekle")
     
@@ -688,9 +642,12 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
     with col2:
         adet = st.number_input("Adet:", min_value=1, value=100, key="add_amount")
     with col3:
-        alis_fiyati = st.number_input("Alış Fiyatı:", 
-                                      value=float(df_final[df_final['Hisse']==secili_hisse]['Fiyat'].iloc[0]),
-                                      format="%.2f", key="add_price")
+        alis_fiyati = st.number_input(
+            "Alış Fiyatı:", 
+            value=float(df_final[df_final['Hisse']==secili_hisse]['Fiyat'].iloc[0]),
+            format="%.2f", 
+            key="add_price"
+        )
     with col4:
         if st.button("➕ EKLE", type="primary", use_container_width=True):
             portfoy_ekle(secili_hisse, adet, alis_fiyati)
@@ -699,7 +656,7 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
     
     st.divider()
     
-    # --- GRAFİK BÖLÜMÜ ---
+    # --- GRAFİK ---
     st.subheader("📊 Detaylı Grafik Analizi")
     
     vade_map = {"1 Hafta": "5d", "1 Ay": "1mo", "3 Ay": "3mo", "6 Ay": "6mo", "1 Yıl": "1y"}
@@ -719,16 +676,16 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
             if isinstance(df_chart.columns, pd.MultiIndex):
                 df_chart.columns = df_chart.columns.get_level_values(0)
             
-            # Teknik göstergeler ekle
             df_chart['SMA_20'] = df_chart['Close'].rolling(window=20).mean()
             df_chart['SMA_50'] = df_chart['Close'].rolling(window=50).mean()
             
-            # Bollinger Bands
             bb = df_chart.ta.bbands(length=20, std=2)
             if bb is not None:
                 df_chart = pd.concat([df_chart, bb], axis=1)
             
-            # Grafik oluştur
+            df_chart['RSI'] = df_chart.ta.rsi(length=14)
+            
+            # Grafik
             fig = make_subplots(
                 rows=3, cols=1, 
                 shared_xaxes=True,
@@ -737,7 +694,7 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
                 subplot_titles=(f"{selected} - Fiyat", "Hacim", "RSI")
             )
             
-            # 1. Mum grafiği
+            # Mum
             fig.add_trace(go.Candlestick(
                 x=df_chart.index,
                 open=df_chart['Open'],
@@ -751,7 +708,7 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
                 decreasing_fillcolor='#ef5350'
             ), row=1, col=1)
             
-            # SMA çizgileri
+            # SMA
             fig.add_trace(go.Scatter(
                 x=df_chart.index, y=df_chart['SMA_20'],
                 name='SMA 20', line=dict(color='yellow', width=1)
@@ -762,7 +719,7 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
                 name='SMA 50', line=dict(color='orange', width=1)
             ), row=1, col=1)
             
-            # Bollinger Bands
+            # BB
             try:
                 bb_upper = [col for col in df_chart.columns if 'BBU_' in col][0]
                 bb_lower = [col for col in df_chart.columns if 'BBL_' in col][0]
@@ -780,31 +737,37 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
             except:
                 pass
             
-            # Stop-Loss çizgisi
+            # Stop/Hedef
             row_data = df_final[df_final['Hisse'] == selected].iloc[0]
             stop_level = row_data['Stop-Loss']
             hedef1 = row_data['Hedef 1:2']
             hedef2 = row_data['Hedef 1:3']
             
-            fig.add_shape(type="line",
-                         x0=df_chart.index[0], x1=df_chart.index[-1],
-                         y0=stop_level, y1=stop_level,
-                         line=dict(color="red", width=2, dash="dash"),
-                         row=1, col=1)
+            fig.add_shape(
+                type="line",
+                x0=df_chart.index[0], x1=df_chart.index[-1],
+                y0=stop_level, y1=stop_level,
+                line=dict(color="red", width=2, dash="dash"),
+                row=1, col=1
+            )
             
-            fig.add_shape(type="line",
-                         x0=df_chart.index[0], x1=df_chart.index[-1],
-                         y0=hedef1, y1=hedef1,
-                         line=dict(color="green", width=1, dash="dot"),
-                         row=1, col=1)
+            fig.add_shape(
+                type="line",
+                x0=df_chart.index[0], x1=df_chart.index[-1],
+                y0=hedef1, y1=hedef1,
+                line=dict(color="green", width=1, dash="dot"),
+                row=1, col=1
+            )
             
-            fig.add_shape(type="line",
-                         x0=df_chart.index[0], x1=df_chart.index[-1],
-                         y0=hedef2, y1=hedef2,
-                         line=dict(color="lime", width=1, dash="dot"),
-                         row=1, col=1)
+            fig.add_shape(
+                type="line",
+                x0=df_chart.index[0], x1=df_chart.index[-1],
+                y0=hedef2, y1=hedef2,
+                line=dict(color="lime", width=1, dash="dot"),
+                row=1, col=1
+            )
             
-            # 2. Hacim
+            # Hacim
             colors = ['#26a69a' if c >= o else '#ef5350' 
                      for c, o in zip(df_chart['Close'], df_chart['Open'])]
             fig.add_trace(go.Bar(
@@ -812,25 +775,27 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
                 name='Hacim', marker_color=colors, opacity=0.6
             ), row=2, col=1)
             
-            # 3. RSI
-            df_chart['RSI'] = df_chart.ta.rsi(length=14)
+            # RSI
             fig.add_trace(go.Scatter(
                 x=df_chart.index, y=df_chart['RSI'],
                 name='RSI', line=dict(color='purple', width=2)
             ), row=3, col=1)
             
-            # RSI seviyeleri
-            fig.add_shape(type="line",
-                         x0=df_chart.index[0], x1=df_chart.index[-1],
-                         y0=70, y1=70,
-                         line=dict(color="red", width=1, dash="dash"),
-                         row=3, col=1)
+            fig.add_shape(
+                type="line",
+                x0=df_chart.index[0], x1=df_chart.index[-1],
+                y0=70, y1=70,
+                line=dict(color="red", width=1, dash="dash"),
+                row=3, col=1
+            )
             
-            fig.add_shape(type="line",
-                         x0=df_chart.index[0], x1=df_chart.index[-1],
-                         y0=30, y1=30,
-                         line=dict(color="green", width=1, dash="dash"),
-                         row=3, col=1)
+            fig.add_shape(
+                type="line",
+                x0=df_chart.index[0], x1=df_chart.index[-1],
+                y0=30, y1=30,
+                line=dict(color="green", width=1, dash="dash"),
+                row=3, col=1
+            )
             
             # Layout
             fig.update_layout(
@@ -871,7 +836,7 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
             c4.metric("🎯 HEDEF 2 (1:3)", f"{hedef2:.2f} ₺", f"+{profit_pct_2:.1f}%")
             c5.metric("⚖️ RİSK", f"{risk_amount:.2f} ₺")
             
-            # Portföyde varsa özel uyarı
+            # Portföy kontrolü
             if selected in st.session_state['portfolio']:
                 portfoy_bilgi = st.session_state['portfolio'][selected]
                 portfoy_kar = (curr_price - portfoy_bilgi['alis_fiyati']) * portfoy_bilgi['adet']
@@ -894,7 +859,7 @@ if st.session_state['data'] is not None and not st.session_state['data'].empty:
 
 else:
     if st.session_state['data'] is not None:
-        st.warning("⚠️ Sonuç bulunamadı. Filtre ayarlarını değiştirin veya farklı hisseler seçin.")
+        st.warning("⚠️ Sonuç bulunamadı. Filtre ayarlarını değiştirin.")
     else:
         st.info("👆 Taramaya başlamak için yukarıdaki butona tıklayın.")
 
@@ -903,6 +868,6 @@ st.divider()
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px;'>
     <p><strong>BIST100 PRO TRADER</strong> | Gelişmiş Teknik Analiz & Portföy Yönetimi</p>
-    <p style='font-size: 12px;'>⚠️ Bu uygulama yatırım tavsiyesi değildir. Tüm kararlar kendi sorumluluğunuzdadır.</p>
+    <p style='font-size: 12px;'>⚠️ Bu uygulama yatırım tavsiyesi değildir. Kararlar kendi sorumluluğunuzdadır.</p>
 </div>
 """, unsafe_allow_html=True)
