@@ -274,24 +274,31 @@ st.sidebar.divider()
 # --- AYARLAR ---
 st.sidebar.header("⚙️ Ayarlar")
 
+# BIST100 TAM LİSTESİ (100 HİSSE)
 varsayilan_hisseler = [
-    "AEFES.IS", "AGHOL.IS", "AHGAZ.IS", "AKBNK.IS", "AKCNS.IS", "AKFGY.IS", "AKFYE.IS", "AKSA.IS", "AKSEN.IS", "ALARK.IS",
-    "ALBRK.IS", "ALFAS.IS", "ARCLK.IS", "ASELS.IS", "ASGYO.IS", "ASTOR.IS", "BERA.IS", "BIENY.IS", "BIMAS.IS", "BIOEN.IS",
-    "BOBET.IS", "BRSAN.IS", "BRYAT.IS", "BUCIM.IS", "CANTE.IS", "CCOLA.IS", "CIMSA.IS", "CWENE.IS", "DOAS.IS", "DOHOL.IS",
-    "ECILC.IS", "ECZYT.IS", "EGEEN.IS", "EKGYO.IS", "ENERY.IS", "ENJSA.IS", "ENKAI.IS", "EREGL.IS", "EUPWR.IS", "EUREN.IS",
-    "FROTO.IS", "GARAN.IS", "GENIL.IS", "GESAN.IS", "GLYHO.IS", "GUBRF.IS", "GWIND.IS", "HALKB.IS", "HEKTS.IS", "IMASM.IS",
-    "IPEKE.IS", "ISCTR.IS", "ISDMR.IS", "ISGYO.IS", "ISMEN.IS", "IZMDC.IS", "KARSN.IS", "KAYSE.IS", "KCAER.IS", "KCHOL.IS",
-    "KLSER.IS", "KONTR.IS", "KONYA.IS", "KOZAA.IS", "KOZAL.IS", "KRDMD.IS", "KZBGY.IS", "MAVI.IS", "MGROS.IS", "MIATK.IS",
-    "ODAS.IS", "OTKAR.IS", "OYAKC.IS", "PENTA.IS", "PETKM.IS", "PGSUS.IS", "PSGYO.IS", "QUAGR.IS", "REEDR.IS", "SAHOL.IS",
-    "SASA.IS", "SDTTR.IS", "SISE.IS", "SKBNK.IS", "SMRTG.IS", "SNGYO.IS", "SOKM.IS", "TABGD.IS", "TAVHL.IS", "TCELL.IS",
-    "THYAO.IS", "TKFEN.IS", "TOASO.IS", "TSKB.IS", "TTKOM.IS", "TTRAK.IS", "TUKAS.IS", "TUPRS.IS", "ULKER.IS", "VAKBN.IS",
-    "VESBE.IS", "VESTL.IS", "YEOTK.IS", "YKBNK.IS", "YYLGD.IS", "ZOREN.IS", "ANSGR.IS"
+    "AEFES.IS", "AGHOL.IS", "AKBNK.IS", "AKSA.IS", "AKSEN.IS", "ALARK.IS", "ALTNY.IS", 
+    "ANSGR.IS", "ARCLK.IS", "ASELS.IS", "ASTOR.IS", "BALSU.IS", "BIMAS.IS", "BINHO.IS",
+    "BRMEN.IS", "BRSAN.IS", "BRYAT.IS", "BSOKE.IS", "BTCIM.IS", "CANTE.IS", "CCOLA.IS",
+    "CIMSA.IS", "DOAS.IS", "DOHOL.IS", "ECILC.IS", "ECZYT.IS", "EGEEN.IS", "EKGYO.IS",
+    "ENERY.IS", "ENJSA.IS", "ENKAI.IS", "ERBOS.IS", "EREGL.IS", "EUREN.IS", "FROTO.IS",
+    "GARAN.IS", "GENIL.IS", "GENTS.IS", "GESAN.IS", "GLYHO.IS", "GOLTS.IS", "GOZDE.IS",
+    "GSDHO.IS", "GUBRF.IS", "GWIND.IS", "HALKB.IS", "HEKTS.IS", "IEYHO.IS", "IMASM.IS",
+    "INDES.IS", "IPEKE.IS", "ISCTR.IS", "ISDMR.IS", "ISGYO.IS", "ISMEN.IS", "KARSN.IS",
+    "KARTN.IS", "KCHOL.IS", "KLSER.IS", "KONTR.IS", "KONYA.IS", "KOZAA.IS", "KOZAL.IS",
+    "KRDMD.IS", "MAVI.IS", "METUR.IS", "MGROS.IS", "MIATK.IS", "ODAS.IS", "OTKAR.IS",
+    "OYAKC.IS", "OYYAT.IS", "PAMEL.IS", "PARSN.IS", "PETKM.IS", "PGSUS.IS", "PSGYO.IS",
+    "QUAGR.IS", "REEDR.IS", "SAHOL.IS", "SASA.IS", "SAYAS.IS", "SELEC.IS", "SISE.IS",
+    "SKBNK.IS", "SMART.IS", "SMRTG.IS", "SNGYO.IS", "SOKM.IS", "SRVGY.IS", "TAVHL.IS",
+    "TCELL.IS", "THYAO.IS", "TKFEN.IS", "TKNSA.IS", "TOASO.IS", "TRGYO.IS", "TSKB.IS",
+    "TTKOM.IS", "TTRAK.IS", "TUKAS.IS", "TUPRS.IS", "ULKER.IS", "VAKBN.IS", "VESTL.IS",
+    "YEOTK.IS", "YKBNK.IS", "YYLGD.IS", "ZOREN.IS"
 ]
 
 secilen_hisseler = st.sidebar.multiselect(
-    "📊 Taranacak Hisseler", 
+    "📊 Taranacak Hisseler (100 adet)", 
     varsayilan_hisseler, 
-    default=varsayilan_hisseler[:20]
+    default=varsayilan_hisseler[:30],
+    help="BIST100'deki tüm hisseler. Varsayılan olarak ilk 30 tanesi seçili."
 )
 
 st.sidebar.markdown("**İndikatör Ayarları**")
@@ -299,6 +306,18 @@ rsi_alt = st.sidebar.slider("RSI Alım (<)", 20, 40, 30)
 rsi_ust = st.sidebar.slider("RSI Satış (>)", 60, 90, 70)
 atr_mult = st.sidebar.slider("Stop-Loss (ATR x)", 1.5, 3.0, 2.0)
 bb_length = st.sidebar.slider("Bollinger Bands", 10, 30, 20)
+
+# Hızlı seçim butonları
+st.sidebar.markdown("**Hızlı Seçim**")
+col1, col2 = st.sidebar.columns(2)
+with col1:
+    if st.button("✅ Tümünü Seç", use_container_width=True):
+        st.session_state['secilen_hisseler_temp'] = varsayilan_hisseler
+        st.rerun()
+with col2:
+    if st.button("❌ Temizle", use_container_width=True):
+        st.session_state['secilen_hisseler_temp'] = []
+        st.rerun()
 
 # --- GELİŞMİŞ ANALİZ MOTORU ---
 def karar_ver(rsi, macd_al, skor, bb_signal, stoch_signal):
@@ -363,7 +382,7 @@ def verileri_getir(hisse_listesi):
     
     for i, symbol in enumerate(hisse_listesi):
         bar.progress((i + 1) / len(hisse_listesi))
-        status.caption(f"🔍 Analiz: {symbol}")
+        status.caption(f"🔍 Analiz: {symbol} ({i+1}/{len(hisse_listesi)})")
         
         try:
             df = yf.download(symbol, period="1y", interval="1d", progress=False)
@@ -575,17 +594,23 @@ with col1:
     start = st.button("🚀 TARAMAYI BAŞLAT", type="primary", use_container_width=True)
 
 with col2:
-    st.info("📊 Gelişmiş teknik analiz ile hisse taraması ve portföy yönetimi")
+    st.info(f"📊 {len(secilen_hisseler)} hisse taranacak | BIST100 Tam Liste")
 
 with col3:
     if st.button("🔄 Yenile", use_container_width=True):
         st.rerun()
 
+# Bilgilendirme
+st.caption(f"💡 **Toplam {len(varsayilan_hisseler)} BIST100 hissesi mevcut** | Seçili: {len(secilen_hisseler)} hisse")
+
 # --- TARAMA ---
 if start:
-    with st.spinner("🔍 Piyasa taranıyor..."):
-        st.session_state['data'] = verileri_getir(secilen_hisseler)
-        st.success("✅ Tarama tamamlandı!")
+    if len(secilen_hisseler) == 0:
+        st.warning("⚠️ Lütfen en az bir hisse seçin!")
+    else:
+        with st.spinner(f"🔍 {len(secilen_hisseler)} hisse taranıyor..."):
+            st.session_state['data'] = verileri_getir(secilen_hisseler)
+            st.success("✅ Tarama tamamlandı!")
 
 # --- SONUÇLAR ---
 if st.session_state['data'] is not None and not st.session_state['data'].empty:
@@ -869,6 +894,6 @@ st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px;'>
     <p><strong>BIST100 PRO TRADER</strong> | Gelişmiş Teknik Analiz & Portföy Yönetimi</p>
     <p style='font-size: 12px;'>⚠️ Bu uygulama yatırım tavsiyesi değildir. Kararlar kendi sorumluluğunuzdadır.</p>
+    <p style='font-size: 11px; margin-top: 10px;'>📊 BIST100 Tam Liste: {len(varsayilan_hisseler)} Hisse</p>
 </div>
 """, unsafe_allow_html=True)
-
