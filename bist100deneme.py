@@ -297,8 +297,8 @@ varsayilan_hisseler = [
 secilen_hisseler = st.sidebar.multiselect(
     "📊 Taranacak Hisseler (100 adet)", 
     varsayilan_hisseler, 
-    default=varsayilan_hisseler[:30],
-    help="BIST100'deki tüm hisseler. Varsayılan olarak ilk 30 tanesi seçili."
+    default=varsayilan_hisseler,  # TÜM HİSSELER VARSAYILAN
+    help="BIST100'deki tüm hisseler. Varsayılan olarak HEPSİ seçili."
 )
 
 st.sidebar.markdown("**İndikatör Ayarları**")
